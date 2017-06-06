@@ -22,6 +22,18 @@ let supervised_task name ty examples =
         else log 0.0)
   }
 
+let load_list_tasks f =
+  let open Yojson.Basic.Util in
+  let j = Yojson.Basic.from_file f in
+  j |> to_list |> List.map ~f:(fun t ->
+      supervised_task (t |> member "name" |> to_string)
+        (tint @> tint)
+        (t |> member "examples" |> to_list |>
+         List.map ~f:(fun example ->
+             let [x;y] = to_list example in
+             (x |> to_list |> List.map ~f:to_int,
+              y |> to_list |> List.map ~f:to_int))))
+
 let score_programs_for_tasks programs tasks =
   List.map tasks ~f:(fun t ->
       let ss = List.map programs t.log_likelihood in
@@ -35,6 +47,8 @@ let get_solutions_for_tasks programs tasks : program list list =
         if l = 0.0 then Some(p) else None))
         
   
+
+
 
 let polynomial_tasks =
   (0--9) |> List.map ~f:(fun a ->
@@ -62,18 +76,11 @@ let list_grammar =
                       primitive "map" ((tint @> tint) @> (tlist tint) @> (tlist tint)) (fun f l -> List.map ~f:f l);
                       primitive "apply" (t0 @> (t0 @> t1) @> t1) (fun x f -> f x);]
 
-let list_tasks =
-  [supervised_task "map +1" ((tlist tint) @> (tlist tint))
-     [([1;2;3], [2;3;4]);
-      ([9],     [10]);
-      ([],      [])]
-  ]
-
 let _ =
   (* change these to the grammar and appropriate type as needed *)
   let grammar = list_grammar
   and tp = ((tlist tint) @> (tlist tint)) (* tint @> tint *)
-  and tasks = list_tasks  
+  and tasks = load_list_tasks "list_tasks.json"
   in
   let programs = iterative_deepening_enumeration grammar tp 1000 in
   let solutions = get_solutions_for_tasks programs tasks in

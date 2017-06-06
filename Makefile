@@ -1,5 +1,4 @@
-c = corebuild
-
+c = corebuild -pkg yojson
 
 type:
 	$(c) type.native; cp type.native test
