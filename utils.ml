@@ -341,3 +341,8 @@ let command_output cmd =
    with End_of_file -> ());
   let _ = Unix.close_process (ic, oc) in
   (Buffer.contents buf)
+
+let slice s e l =
+  (*  we might want to make this always be safe *)
+  List.slice l s e;;
+

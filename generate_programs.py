@@ -1,3 +1,4 @@
+import json
 import math
 import sys
 import random
@@ -31,17 +32,28 @@ def random_lists(n, minlength=None):
 
 global_problems = []
 class Problem():
-    def __init__(self, desc, examples, ref=None):
-        self.desc = desc
+    def __init__(self, description, examples, ref=None):
+        self.description = description
         self.examples = examples
         self.ref = ref
         global_problems.append(self)
 
     def __str__(self):
-        return "Description: " + self.desc + \
+        return "Description: " + self.description + \
                "\nExamples:\n" + \
                "\n".join([str(x) + " -> " + str(y) for x, y in self.examples]) + \
                "\n"
+
+    @staticmethod
+    def export(f = "list_tasks.json"):
+        # remove duplicates
+        ps = []
+        for p in global_problems:
+            if not any([ q.description == p.description for q in ps ]):
+                ps.append(p)
+        with open(f,'w') as handle:
+            handle.write(json.dumps([{'name': p.description, 'examples': p.examples}
+                                     for p in ps ]))
 
 # Element-wise add
 def f_elementwise_add(num_progs, num_ex=10):
@@ -55,7 +67,7 @@ def f_elementwise_prod(num_progs, num_ex=10):
     for i in range(num_progs):
         e = random.randint(1, 9)
         Problem('Multiply %d to each element' % e,
-                [(x, [j * e for j in x]) for x in random_lists(num_ex)])
+                [(x, [int(j * e) for j in x]) for x in random_lists(num_ex)])
 
 # Append an element to a list
 def f_append(num_progs, num_ex=10):
@@ -489,6 +501,8 @@ if __name__ == '__main__':
         strfunc = "%s(%d, %d)" % (choice(funcs), K, E)
         exec(strfunc)
     print "Global problems generated:", len(global_problems)
+
+    Problem.export()
 
     # for i in global_problems:
     #     print i

@@ -211,6 +211,7 @@ let rec get_arity = function
 let make_ground g = TCon(g,[]);;
 let tint = make_ground "int";;
 let treal = make_ground "real";;
+let tboolean = make_ground "boolean";;
 let t0 = TID(0);;
 let t1 = TID(1);;
 let t2 = TID(2);;

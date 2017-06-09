@@ -36,6 +36,24 @@ let rec show_program = function
 
 let primitive n t p = Primitive(t, n)
 
+let lookup_primitive  = function
+  | "k0" -> magical 0
+  | "k1" -> magical 1
+  | "+" -> magical (+)
+  | "-" -> magical (-)
+  | "*" -> magical ( * )
+  | "apply" -> magical (fun x f -> f x)
+  | "map" -> magical (fun f l -> List.map ~f:f l)
+  | "sort" -> magical (List.sort ~cmp:(fun x y -> x - y))
+  | "reverse" -> magical List.rev
+  | "append" -> magical (@)
+  | "singleton" -> magical (fun x -> [x])
+  | "slice" -> magical slice
+  | "length" -> magical List.length
+  | "filter" -> magical (fun f l -> List.filter ~f:f l)
+  | "eq?" -> magical (fun x y -> x = y)
+  | n -> raise (Failure ("unknown primitive "^n))
+                   
 let rec evaluate (environment: 'b list) (p:program) : 'a =
   match p with
   | Abstraction(b) -> magical @@ fun argument -> evaluate (argument::environment) b
@@ -44,12 +62,10 @@ let rec evaluate (environment: 'b list) (p:program) : 'a =
   | Conditional(t,y,n) ->
     if magical @@ evaluate environment t
     then evaluate environment y else evaluate environment n
-  | Primitive(_,"k0") -> magical 0
-  | Primitive(_,"k1") -> magical 1
-  | Primitive(_,"+") -> magical (+)
-  | Primitive(_,"*") -> magical ( * )
-  | Primitive(_,"apply") -> magical (fun x f -> f x)
-  | Primitive(_,"map") -> magical (fun f l -> List.map ~f:f l)
+  | Primitive(_,n) -> lookup_primitive n
+
+
+
 
 type grammar = {
   logVariable: float;
