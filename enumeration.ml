@@ -54,11 +54,17 @@ and
     List.concat
 
 let iterative_deepening_enumeration (g:grammar) (request:tp) (size:int) : (program list) =
+  let startTime = Time.now () in
   let rec deepen bound =
     let possibleSolutions = enumerate_programs g empty_context request [] bound in
     if List.length possibleSolutions<size then deepen (bound +. 1.0) else
       List.map ~f:(fun (p,_,_) -> p) possibleSolutions
   in
-  deepen 1.0
+  let result = deepen 1.0 in
+  Printf.printf "Enumerated %d programs of type %s in time %s\n"
+    (List.length result)
+    (string_of_type request)
+    (Time.diff (Time.now ()) startTime |> Core.Span.to_string);
+  result
 
 

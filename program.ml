@@ -34,7 +34,19 @@ let rec show_program = function
   | Primitive(_,n) -> n
   | Conditional(t,y,n) -> "(if "^show_program t^" "^show_program y^" "^show_program n^")"
 
-let primitive n t p = Primitive(t, n)
+let lookup_primitive_callback =
+  ref (fun n ->
+      raise (Failure ("unknown primitive "^n)))
+    
+let primitive n t p =
+  (try
+    !lookup_primitive_callback n
+  with _ ->
+    let old_callback = !lookup_primitive_callback in
+    Printf.printf "Registering primitive %s\n" n;
+    lookup_primitive_callback :=
+      fun np -> if n = np then magical p else old_callback np);
+  Primitive(t, n)
 
 let lookup_primitive  = function
   | "k0" -> magical 0
@@ -52,7 +64,7 @@ let lookup_primitive  = function
   | "length" -> magical List.length
   | "filter" -> magical (fun f l -> List.filter ~f:f l)
   | "eq?" -> magical (fun x y -> x = y)
-  | n -> raise (Failure ("unknown primitive "^n))
+  | n -> raise (Failure "unknown primitive")
                    
 let rec evaluate (environment: 'b list) (p:program) : 'a =
   match p with
@@ -62,7 +74,7 @@ let rec evaluate (environment: 'b list) (p:program) : 'a =
   | Conditional(t,y,n) ->
     if magical @@ evaluate environment t
     then evaluate environment y else evaluate environment n
-  | Primitive(_,n) -> lookup_primitive n
+  | Primitive(_,n) -> (* !lookup_primitive_callback *) lookup_primitive n |> magical
 
 
 
