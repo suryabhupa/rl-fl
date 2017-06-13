@@ -4,7 +4,7 @@ open Utils
 open Type
 open Program
 open Enumeration
-
+open Grammar
 
 
 type task =
@@ -48,6 +48,14 @@ let enumerate_solutions_for_tasks grammar tasks frontier_size : program list lis
       let j = List.findi ts ~f:(fun _ tp -> tp = t.task_type) |> get_some |> fst in
       let frontier = List.nth fs j |> get_some in
       get_solutions_for_tasks frontier [t] |> List.hd |> get_some)
+
+let top_solutions_for_tasks k grammar tasks solutions =
+  let top_solution_for_task t s =
+    List.map s ~f:(fun p -> (likelihood_under_grammar grammar t.task_type p, p))
+    |> List.sort ~cmp:(fun (l1,_) (l2,_) -> if l2 -. l1 > 0.0 then 1 else -1)
+    |> flip List.take k
+    |> List.map ~f:(fun (_,p) -> p)
+  in List.map2_exn ~f:top_solution_for_task tasks solutions
 
 
 let polynomial_tasks =

@@ -5,7 +5,8 @@ open Type
 open Program
 open Enumeration
 open Task
-
+open Grammar
+    
 let load_list_tasks f =
   let open Yojson.Basic.Util in
   let j = Yojson.Basic.from_file f in
@@ -42,8 +43,12 @@ let list_grammar =
                       primitive "slice" (tint @> tint @> tlist tint @> tlist tint) (slice);
                       primitive "length" (tlist tint @> tint) (List.length);
                       primitive "map" ((tint @> tint) @> (tlist tint) @> (tlist tint)) (fun f l -> List.map ~f:f l);
+                      primitive "fold_left" ((tint @> (tlist tint) @> tint) @> tint @> (tlist tint) @> tint) (fun f x0 l -> List.fold_left ~f:f ~init:x0 l);
+                      primitive "fold_right" (((tlist tint) @> tint @> tint) @> tint @> (tlist tint) @> tint) (fun f x0 l -> List.fold_right ~f:f ~init:x0 l);
                       primitive "filter" ((tint @> tboolean) @> (tlist tint) @> (tlist tint)) (fun f l -> List.filter ~f:f l);
                       primitive "eq?" (tint @> tint @> tboolean) ( = );
+                      primitive "not" (tboolean @> tboolean) (not);
+                      primitive "gt?" (tint @> tint @> tboolean) (fun (x: int) (y: int) -> x > y);
                       primitive "apply" (t0 @> (t0 @> t1) @> t1) (fun x f -> f x);]
 
 let _ =
@@ -51,7 +56,7 @@ let _ =
   let grammar = list_grammar
   and tasks = load_list_tasks "list_tasks.json"
   in
-  let solutions = enumerate_solutions_for_tasks grammar tasks 100000 in
+  let solutions = enumerate_solutions_for_tasks grammar tasks 1000000 in
 
 
   List.iter2_exn tasks solutions ~f:(fun t s ->

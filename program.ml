@@ -79,18 +79,3 @@ let rec evaluate (environment: 'b list) (p:program) : 'a =
 
 
 
-type grammar = {
-  logVariable: float;
-  library: (program*tp*float) list;
-}
-
-let primitive_grammar primitives =
-  {library = List.map primitives ~f:(fun p -> match p with
-       |Primitive(t,_) -> (p,t, 0.0 -. (log (float_of_int (List.length primitives)))));
-   logVariable = log 0.5
-  }
-
-
-
-let string_of_grammar g =
-  string_of_float g.logVariable ^ "\n"

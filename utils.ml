@@ -108,6 +108,7 @@ let combine_with f _ a b =
   | (_,None) -> a
   | (Some(x),Some(y)) -> Some(f x y)
 
+let flip f x y = f y x
 
 let (--) i j = 
   let rec aux n acc =
