@@ -10,6 +10,8 @@ task:
 	$(c) task.native; cp task.native test
 list:
 	$(c) list_synthesizer.native; cp list_synthesizer.native test
+polynomial:
+	$(c) polynomial.native; cp polynomial.native test
 clean:
 	rm -rf _build test
 run:

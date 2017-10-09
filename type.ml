@@ -14,6 +14,7 @@ let empty_context = (0,TypeMap.empty);;
 let make_arrow t q = TCon("->", [t;q]);;
 let (@>) = make_arrow;;
 
+(* arguments_and_return_up_type (t1 @> t2 @> ... @> T) = ([t1;t2;...] T) *)
 let rec arguments_and_return_of_type t =
   match t with
   | TCon("->",[p;q]) ->
