@@ -13,7 +13,7 @@ let polynomial_grammar =
                       primitive "k1" tint 1;
                       primitive "+" (tint @> tint @> tint) (+);
                       primitive "*" (tint @> tint @> tint) ( * );
-                      primitive "bindNumber" (tint @> (tint @> t0) @> t0) (fun x f -> f x);
+                      primitive "let" (t1 @> (t1 @> t0) @> t0) (fun x f -> f x);
                     ]
 
 
