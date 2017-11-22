@@ -29,7 +29,7 @@ let rec right_of_arrow t =
 
 let rec string_of_type (t : tp) : string = 
   match t with
-  | TID(i) -> string_of_int i
+  | TID(i) -> "TV["^string_of_int i^"]"
   | TCon(k,[]) -> k
   | TCon(k,[p;q]) when k = "->" -> "("^(string_of_type p)^" -> "^(string_of_type q)^")"
   | TCon(k,a) -> "("^k^" "^(String.concat ~sep:" " (List.map a ~f:string_of_type))^")"

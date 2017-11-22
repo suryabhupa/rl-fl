@@ -84,7 +84,6 @@ let rec bind_fragment context environment
     (context, List.nth_exn environment j, [], FreeMap.empty)
   | _ -> raise FragmentFail
     
-    
 
 let rec program_matches_fragment (p:program) (f:fragment) : (program list) option =
   match (f,p) with 
@@ -254,7 +253,61 @@ let induce_fragments (candidates : fragment list) (frontiers : frontier list) =
 
   
 
-let main() =
+let testClosing() =
   let p = Apply(Abstraction(Apply(Index(2),Index(0))),Index(1)) in
   [FApply(FIndex(0),FAbstraction(FIndex(99)))] @ propose_fragments 1 p |>
   List.map ~f:(fun f -> Printf.printf "%s\t%s\n" (string_of_fragment f) (close_fragment f |> show_program))
+
+let testBinding (intended_outcome : bool) (f : fragment) (p : program) =
+  Printf.printf "\nBinding test case: %s  ==  %s\n" (string_of_fragment f) (string_of_program p);
+  try
+    let (context,t,holes, bindings) = bind_fragment empty_context [] f p in
+    (*   let context = unify context t (tint @> tint) in *)
+    let (t,context) = chaseType context t in
+    Printf.printf "Fragment return type: %s\n" (string_of_type t);
+    FreeMap.iteri bindings ~f:(fun ~key ~data:(bound_type,bound_program) ->
+        Printf.printf "Free variable binding of %d is %s : %s\n" key (string_of_program bound_program)
+          (string_of_type @@ fst @@ chaseType context bound_type));
+    holes |> List.iteri ~f:(fun h (t,v) ->
+        Printf.printf "hole binding %d is %s : %s\n" h (string_of_program v) (string_of_type t));
+    assert intended_outcome
+  with _ -> begin
+      Printf.printf "Failure binding %s with %s\n" (string_of_fragment f) (string_of_program p);
+      assert (not intended_outcome)
+    end
+;;
+
+let binding_test_cases () = 
+  testBinding true
+    (FApply(FIndex(0),FIndex(1))) (Apply(primitive "+" (tint @> tint @> tint) (+),
+                                         primitive "k0" tint 0));
+
+  testBinding true
+    (FAbstraction(FApply(FIndex(0),FVariable)))
+    (Abstraction(Apply(Index(0), primitive "k0" tint 0)))
+  ;
+
+  testBinding true
+    (FAbstraction(FApply(FIndex(0),FVariable)))
+    (Abstraction(Apply(Index(0), Index(99))))
+  ;
+
+  testBinding false
+    (FAbstraction(FAbstraction(FApply(FIndex(1),FVariable))))
+    (Abstraction(Abstraction(Apply(Index(1), Index(0)))))
+  ;
+
+
+  testBinding false
+    (FAbstraction(FAbstraction(FApply(FIndex(1),FVariable))))
+    ( Abstraction( Abstraction( Apply( Index(1),
+                                       Abstraction(Apply(Index(0), Index(2)))))))
+  ;
+
+  testBinding true
+    (FAbstraction(FAbstraction(FApply(FIndex(1),FVariable))))
+    ( Abstraction( Abstraction( Apply( Index(1),
+                                       Abstraction(Apply(Index(0), Index(3)))))))
+;;
+
+(* binding_test_cases() *)

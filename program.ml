@@ -32,6 +32,7 @@ let rec show_program = function
     "("^show_program p^" "^show_program q^")"
   | Primitive(_,n) -> n
 
+let string_of_program = show_program
 
 let lookup_primitive_callback =
   ref (fun n ->
