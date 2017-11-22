@@ -5,6 +5,9 @@ open Type
 open Program
 open Grammar
 
+type frontier = {
+  programs: (program*float) list;
+}
 
 let rec enumerate_programs (g: grammar) (context: tContext) (request: tp) (environment: tp list) (depth: float)
     (callBack: program -> tContext -> float -> unit) : unit =
@@ -35,13 +38,13 @@ and
       enumerate_applications g k applicationType a environment (depth+.ll) 
       (fun a k a_ll -> callBack a k (a_ll+.ll)))
 
-let iterative_deepening_enumeration (g:grammar) (request:tp) (size:int) : (program list) =
+let iterative_deepening_enumeration (g:grammar) (request:tp) (size:int) : frontier =
   let startTime = Time.now () in
   let rec deepen bound =
     let accumulator = ref [] in
     let _ =
       enumerate_programs g empty_context request [] bound
-        (fun p _ _ -> accumulator := p :: !accumulator)
+        (fun p _ ll -> accumulator := (p,ll) :: !accumulator)
     in
     let possibleSolutions = !accumulator in
     if List.length possibleSolutions<size then deepen (bound +. 1.0) else possibleSolutions
@@ -51,6 +54,6 @@ let iterative_deepening_enumeration (g:grammar) (request:tp) (size:int) : (progr
     (List.length result)
     (string_of_type request)
     (Time.diff (Time.now ()) startTime |> Core.Span.to_string);
-  result
+  {programs =  result}
 
 

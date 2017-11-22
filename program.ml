@@ -8,7 +8,6 @@ type program =
   | Abstraction of program
   | Apply of program*program
   | Primitive of tp * string
-  | Conditional of program*program*program
 
 let is_index = function
   |Index(_) -> true
@@ -26,13 +25,13 @@ let rec program_subexpressions p =
   p::(List.map (program_children p) program_subexpressions |> List.concat)
 
 let rec show_program = function
-  | Index(j) -> string_of_int j
+  | Index(j) -> "$" ^ string_of_int j
   | Abstraction(body) ->
     "(lambda "^show_program body^")"
   | Apply(p,q) ->
     "("^show_program p^" "^show_program q^")"
   | Primitive(_,n) -> n
-  | Conditional(t,y,n) -> "(if "^show_program t^" "^show_program y^" "^show_program n^")"
+
 
 let lookup_primitive_callback =
   ref (fun n ->
@@ -71,9 +70,6 @@ let rec evaluate (environment: 'b list) (p:program) : 'a =
   | Abstraction(b) -> magical @@ fun argument -> evaluate (argument::environment) b
   | Index(j) -> magical @@ List.nth_exn environment j
   | Apply(f,x) -> (magical @@ evaluate environment f) (magical @@ evaluate environment x)
-  | Conditional(t,y,n) ->
-    if magical @@ evaluate environment t
-    then evaluate environment y else evaluate environment n
   | Primitive(_,n) -> (* !lookup_primitive_callback *) lookup_primitive n |> magical
 
 

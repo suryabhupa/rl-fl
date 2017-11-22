@@ -26,28 +26,38 @@ let supervised_task name ty examples =
   }
 
 
-        
-let score_programs_for_tasks programs tasks =
-  List.map tasks ~f:(fun t ->
-      let ss = List.map programs t.log_likelihood in
-      if List.mem ss 0.0 then Printf.printf "HIT: %s\n" t.name else ();
-      ss)
 
-let get_solutions_for_tasks programs tasks : program list list =
-  let scores = score_programs_for_tasks programs tasks in
-  List.map scores ~f:(fun likelihoods ->
-      List.zip_exn  programs likelihoods |> List.filter_map ~f:(fun (p,l) ->
-        if l = 0.0 then Some(p) else None))
-        
-let enumerate_solutions_for_tasks grammar tasks frontier_size : program list list =
+let keep_best_programs_in_frontier (k : int) (f : frontier) : frontier =
+ {programs =  List.sort ~cmp:(fun (_,a) (_,b) -> if a > b then 1 else -1) f.programs |> flip List.take k }
+
+(* Takes a frontier and a task. Ads in the likelihood on the task to
+   the frontier and removes things that didn't hit the task *)
+let score_programs_for_task (f:frontier) (t:task) : frontier =
+  {programs = f.programs |> List.filter_map ~f:(fun (program, descriptionLength) ->
+       let likelihood = t.log_likelihood program in
+       if likelihood > -0.1 then begin 
+         Printf.printf "HIT: %s\n" t.name;
+         Some((program, descriptionLength +. likelihood))
+       end
+       else None)
+  }
+
+let enumerate_solutions_for_tasks grammar tasks frontier_size ?keepTheBest:(keepTheBest = 0) : frontier list =
   (* what are all of the different types that we need to enumerate for *)
   let ts = List.map tasks ~f:(fun t -> t.task_type) |> List.dedup in
-  (* the corresponding frontiers *)
+  
+  (* the corresponding frontiers. [frontier] *)
   let fs = List.map ts ~f:(fun t -> iterative_deepening_enumeration grammar t frontier_size) in
+
+  let entire_frontiers = 
   List.map tasks ~f:(fun t ->
       let j = List.findi ts ~f:(fun _ tp -> tp = t.task_type) |> get_some |> fst in
       let frontier = List.nth fs j |> get_some in
-      get_solutions_for_tasks frontier [t] |> List.hd |> get_some)
+      score_programs_for_task frontier t)
+  in
+  match keepTheBest with
+  | 0 -> entire_frontiers
+  | k -> entire_frontiers |> List.map ~f:(keep_best_programs_in_frontier k)
 
 let top_solutions_for_tasks k grammar tasks solutions =
   let top_solution_for_task t s =
@@ -58,14 +68,7 @@ let top_solutions_for_tasks k grammar tasks solutions =
   in List.map2_exn ~f:top_solution_for_task tasks solutions
 
 
-let polynomial_tasks =
-  (0--9) |> List.map ~f:(fun a ->
-      (0--9) |> List.map ~f:(fun b ->
-          (0--9) |> List.map ~f:(fun c ->
-              let examples = List.map (0--5) ~f:(fun x -> (x, a*x*x + b*x + c)) in
-              let n = Printf.sprintf "(%i x^2 + %i x + %i)" a b c in
-              supervised_task n (tint @> tint) examples)))
-  |> List.concat |> List.concat
+
 
 
 let arithmetic_grammar =
