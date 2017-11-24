@@ -22,6 +22,12 @@ let rec arguments_and_return_of_type t =
     (p::arguments,return)
   | _ -> ([],t)
 
+(* return_of_type (t1 @> t2 @> ... @> T) = T *)
+let rec return_of_type t =
+  match t with
+  | TCon("->",[_;q]) -> return_of_type q 
+  | _ -> t
+
 let rec right_of_arrow t =
   match t with
   | TCon("->",[_;p]) -> p
@@ -66,6 +72,8 @@ let rec occurs (i : int) (t : tp) : bool =
 
 let occursCheck = true
 
+exception UnificationFailure
+
 let rec unify context t1 t2 : tContext = 
   let (t1_, context_) = chaseType context t1 in
   let (t2_, context__) = chaseType context_ t2 in
@@ -75,15 +83,15 @@ and unify_ context t1 t2 : tContext =
   | (TID(i), TID(j)) when i = j -> context
   | (TID(i), _) ->
     if occursCheck && occurs i t2
-    then raise (Failure "occurs")
+    then raise UnificationFailure
     else bindTID i t2 context
   | (_,TID(i)) ->
     if occursCheck && occurs i t1
-    then raise (Failure "occurs")
+    then raise UnificationFailure
     else bindTID i t1 context
   | (TCon(k1,as1),TCon(k2,as2)) when k1 = k2 -> 
     List.fold2_exn ~init:context as1 as2 ~f:unify
-  | _ -> raise (Failure "unify")
+  | _ -> raise UnificationFailure
 
 
 type fast_type = 

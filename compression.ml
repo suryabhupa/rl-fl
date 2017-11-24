@@ -16,8 +16,62 @@ type fragment =
   | FPrimitive of tp * string
   | FVariable
 
+let rec string_of_fragment = function
+  | FIndex(j) -> "$" ^ string_of_int j
+  | FAbstraction(body) ->
+    "(lambda "^string_of_fragment body^")"
+  | FApply(p,q) ->
+    "("^string_of_fragment p^" "^string_of_fragment q^")"
+  | FPrimitive(_,n) -> n
+  | FVariable -> "??"
+    
+let is_fragment_index = function
+  | FIndex(_) -> true
+  | _ -> false
+
+let infer_fragment_type ?context:(context = empty_context) ?environment:(environment = [])
+    (f : fragment) : tp =
+  let bindings : (tp FreeMap.t) ref = ref FreeMap.empty in
+  let rec infer context environment = function
+    | FIndex(j) when j < List.length environment ->
+      let (t,context) = List.nth_exn environment j |> chaseType context in (context,t)
+    | FIndex(j) -> begin 
+      match FreeMap.find !bindings (j - List.length environment) with
+      | Some(t) -> (context,t)
+      | None ->
+        let (t,context) = makeTID context in
+        bindings := FreeMap.add !bindings ~key:(j - List.length environment) ~data:t;
+        (context,t)
+      end
+    | FPrimitive(t,_) -> let (t,context) = instantiate_type context t in (context,t)
+    | FVariable ->
+      let (t,context) = makeTID context in (context,t)
+    | FAbstraction(b) ->
+      let (xt,context) = makeTID context in
+      let (context,rt) = infer context (xt::environment) b in
+      let (ft,context) = chaseType context (xt @> rt) in
+      (context,ft)
+    | FApply(f,x) ->
+      let (rt,context) = makeTID context in
+      let (context, xt) = infer context environment x in
+      let (context, ft) = infer context environment f in
+      let context = unify context ft (xt @> rt) in
+      let (rt, context) = chaseType context rt in
+      (context, rt)
+  in
+  let (context,t) = infer context environment f
+  in chaseType context t |> fst
+
+type fragment_grammar = {
+  logVariable : float;
+  fragments : (fragment*tp*float) list;
+}
+
 exception FragmentFail
 
+(* Tries binding the program with the fragment. The type returned is
+   that of the *fragment*, not that of the program or the program
+   unified with the fragment *)
 let rec bind_fragment context environment
     (f : fragment) (p : program) : tContext*tp*((tp*program) list)*((tp*program) FreeMap.t) =
   
@@ -83,7 +137,115 @@ let rec bind_fragment context environment
   | (FIndex(j),Index(k)) when j < List.length environment && j = k ->
     (context, List.nth_exn environment j, [], FreeMap.empty)
   | _ -> raise FragmentFail
+
+
+let unifying_fragments (g : fragment_grammar) (environment : tp list) (request : tp) (context : tContext)
+   : (fragment*tp*tContext*float) list =
+  let candidates = 
+  g.fragments @ List.mapi ~f:(fun j t -> (FIndex(j),t,g.logVariable)) environment |>
+  List.filter_map ~f:(fun (p,t,ll) ->
+      try
+        let (t,context) = if not (is_fragment_index p) then instantiate_type context t else (t,context) in
+        let (argument_types, return_type) = arguments_and_return_of_type t in
+        let newContext = unify context return_type request in
+        Some(p, t, newContext,ll)
+      with UnificationFailure -> None)
+  in
+  let z = List.map ~f:(fun (_,_,_,ll) -> ll) candidates |> lse_list in
+  List.map ~f:(fun (p,t,k,ll) -> (p,t,k,ll-.z)) candidates
+
+
+let likelihood_under_fragments (g : fragment_grammar) (request : tp) (expression : program) : float =
+
+  (* Any chain of applications could be broken up at any point by a
+     fragment. This enumerates all of the different ways of breaking up an
+     application chain into a function and a list of arguments.
+     Example: (+ 1 2) -> [(+,[1,2]), (+1,[2])] *)
+  let rec possible_application_parses (p : program) : (program*(program list)) list =
+    match p with
+    | Apply(f,x) ->
+      [(p,[])] @
+      (possible_application_parses f |> List.map ~f:(fun (fp,xp) -> (fp,xp @ [x])))
+    | _ -> [(p,[])]
+  in
+  
+  let rec likelihood (context : tContext) (environment : tp list) (request : tp) (p : program)
+    : (tContext*float) =
+    match request with
     
+    (* a function - must start out with a sequence of lambdas *)
+    | TCon("->",[argument;return_type]) -> 
+      let newEnvironment = environment @ [argument] in
+      let body = remove_abstractions 1 p in
+      likelihood context  newEnvironment return_type body
+        
+    | _ -> (* not a function so must be an application *)
+      (* fragments we might match with based on their type *)
+      let candidates = unifying_fragments g environment request context in
+      (* For each way of carving up the program into a function and a list of arguments... *)
+      possible_application_parses p |> List.map ~f:(fun (f,arguments) ->
+          List.map candidates ~f:(fun (candidate,unified_type,context,ll) ->
+            try
+              let (context, fragment_type, holes, bindings) = match f with
+                | Index(i) ->
+                  if FIndex(i) = candidate then (context, List.nth_exn environment i, [], FreeMap.empty)
+                  else raise FragmentFail
+                | _ -> 
+                  bind_fragment context environment candidate f
+              in
+              Printf.printf "BOUND: %s & %s\n" (string_of_program f) (string_of_fragment candidate);
+              (* todo: handle fragments with holes and bindings in them *)
+              (* assert (holes = []); *)
+              (* assert (FreeMap.length bindings = 0); *)
+              (* The final return type of the fragment corresponds to the requested type *)
+              let context = unify context request (return_of_type fragment_type) in
+              
+              let (argument_types, _) = arguments_and_return_of_type fragment_type in
+              if not (List.length argument_types = List.length arguments) then
+                begin
+                  Printf.printf "request: %s\n" (string_of_type request);
+                  Printf.printf "program: %s\n" (string_of_program p);
+                  Printf.printf "F = %s, xs = %s\n" (string_of_program f)
+                    (arguments |> List.map ~f:string_of_program |> join ~separator:" ;; ");
+                  Printf.printf "fragment: %s\n" (string_of_fragment candidate);
+                  Printf.printf "fragment type: %s\n" (string_of_type fragment_type);
+                  Printf.printf "argument types: %s\n" (argument_types |> List.map ~f:string_of_type |> join);
+                  Printf.printf "arguments: %s\n" (arguments |> List.map ~f:string_of_program |> join);
+                  assert false
+                end
+              else ()
+              ;
+
+              (* treat the holes and the bindings as though they were arguments *)
+              let arguments = List.map holes ~f:(fun (_,h) -> h) @
+                              List.map (FreeMap.to_alist bindings) ~f:(fun (_,(_,binding)) -> binding) @ 
+                              arguments in
+              let argument_types = List.map holes ~f:(fun (ht,_) -> ht) @
+                                   List.map (FreeMap.to_alist bindings) ~f:(fun (_,(binding,_)) -> binding) @ 
+                                   argument_types in
+
+              let (application_likelihood, context) = 
+                List.fold_right (List.zip_exn arguments argument_types)
+                  ~init:(ll,context)
+                  ~f:(fun (argument, argument_type) (ll,context) ->
+                      let (context,argument_likelihood) = likelihood context environment argument_type argument
+                      in (ll+.argument_likelihood, context))
+              in
+              (Some(context), application_likelihood)
+            with | FragmentFail -> (None, Float.neg_infinity)
+                 | UnificationFailure -> assert false)) |> List.concat |>
+
+      (* Accumulate the probabilities from each parse. All of the contexts should be equivalent. *)
+      List.fold_right ~init:(context, Float.neg_infinity) ~f:(fun (mayBeContext, ll)
+                                                               (oldContext, acc) ->
+          match mayBeContext with
+          | None -> begin
+              assert (is_invalid ll);
+              (oldContext,acc) end
+          | Some(c) when is_valid ll -> (c, lse acc ll)
+          | Some(_) -> (oldContext, acc))
+        
+  in likelihood empty_context [] request expression |> snd
 
 let rec program_matches_fragment (p:program) (f:fragment) : (program list) option =
   match (f,p) with 
@@ -113,14 +275,17 @@ let rec program_matches_fragment (p:program) (f:fragment) : (program list) optio
 (*       Some([p]) *)
     
 
-let rec string_of_fragment = function
-  | FIndex(j) -> "$" ^ string_of_int j
-  | FAbstraction(body) ->
-    "(lambda "^string_of_fragment body^")"
-  | FApply(p,q) ->
-    "("^string_of_fragment p^" "^string_of_fragment q^")"
-  | FPrimitive(_,n) -> n
-  | FVariable -> "??"
+
+
+let rec fragment_of_program = function
+  | Index(j) -> FIndex(j)
+  | Abstraction(body) ->FAbstraction(fragment_of_program body)
+  | Apply(p,q) -> FApply(fragment_of_program p, fragment_of_program q)
+  | Primitive(t,n) -> FPrimitive(t,n)
+
+let fragment_grammar_of_grammar (g : grammar) : fragment_grammar =
+  {logVariable = g.logVariable;
+  fragments = List.map (g.library) ~f:(fun (p,t,l) -> (fragment_of_program p, t, l))}
 
 let close_fragment (f:fragment) : program =
   (* Mapping from <index beyond this fragment>, <which lambda it refers to, starting at 0> *)
@@ -177,21 +342,23 @@ let rec fragments (d:int) (a:int) (p:program) =
   in
   if a = 1 && (not (refers_to_bound_variables 0 p)) then FVariable :: recursiveFragments else recursiveFragments
 
-let is_fragment_nontrivial f =
-  let rec variables = function
-    | FVariable -> 1
-    | FAbstraction(b) -> variables b
-    | FApply(f,x) -> variables f + variables x
-    | _ -> 0
-  in
-  let rec primitives = function
-    | FPrimitive(_,_) -> 1
-    | FAbstraction(b) -> primitives b
-    | FApply(f,x) -> primitives f + primitives x
-    | _ -> 0
-  in
-  Float.of_int (primitives f) +. (0.5 *. (Float.of_int (variables f))) > 1.5
-     
+let is_fragment_nontrivial = function
+  | FAbstraction(_) -> false
+  | f -> 
+    let rec variables = function
+      | FVariable -> 1
+      | FAbstraction(b) -> variables b
+      | FApply(f,x) -> variables f + variables x
+      | _ -> 0
+    in
+    let rec primitives = function
+      | FPrimitive(_,_) -> 1
+      | FAbstraction(b) -> primitives b
+      | FApply(f,x) -> primitives f + primitives x
+      | _ -> 0
+    in
+    Float.of_int (primitives f) +. (0.5 *. (Float.of_int (variables f))) > 1.5
+
 let rec propose_fragments (a:int) (program:program) : fragment list =
   let recursiveFragments =
     match program with
@@ -309,5 +476,21 @@ let binding_test_cases () =
     ( Abstraction( Abstraction( Apply( Index(1),
                                        Abstraction(Apply(Index(0), Index(3)))))))
 ;;
+
+let application_parses_test_cases() =
+  let rec possible_application_parses (p : program) : (program*(program list)) list =
+    match p with
+    | Apply(f,x) ->
+      [(p,[])] @
+      (possible_application_parses f |> List.map ~f:(fun (fp,xp) -> (fp,xp @ [x])))
+    | _ -> [(p,[])]
+  in
+
+  possible_application_parses (Apply(Apply(Apply(Index(0),Index(1)),Index(2)),Index(3))) |> List.iter ~f:(fun (f,a) ->
+      Printf.printf "%s w/arguments %s\n" (string_of_program f) (a |> List.map ~f:string_of_program |> join ~separator:" ;; "))
+;;
+
+(* application_parses_test_cases();; *)
+
 
 (* binding_test_cases() *)

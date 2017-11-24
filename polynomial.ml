@@ -23,16 +23,29 @@ let polynomial_tasks =
 let polynomial_grammar =
   primitive_grammar [ primitive "k0" tint 0;
                       primitive "k1" tint 1;
+                      primitive "k2" tint 2;
+                      primitive "k3" tint 3;
                       primitive "+" (tint @> tint @> tint) (+);
                       primitive "*" (tint @> tint @> tint) ( * );
-                      primitive "let" (t1 @> (t1 @> t0) @> t0) (fun x f -> f x);
+                      (*                       primitive "apply" (t1 @> (t1 @> t0) @> t0) (fun x f -> f x); *)
                     ]
 
 
                                                              
 let _ =
   let g = polynomial_grammar in
-  let frontiers = enumerate_solutions_for_tasks g polynomial_tasks 1000 ~keepTheBest:10 in
+  let gf = fragment_grammar_of_grammar g in
+  let gf = {logVariable = gf.logVariable;
+            fragments = (FApply(FApply(FPrimitive(tint @> tint @> tint,"*"),FIndex(0)),FIndex(0)),
+                         tint,
+                         0.0)::gf.fragments} in
+  let frontiers = enumerate_solutions_for_tasks g polynomial_tasks 1000 ~keepTheBest:1000 in
+  frontiers |> List.iter ~f:(fun frontier -> frontier.programs |> List.iter ~f:(fun (p,ll) ->
+      Printf.printf "%s %f %f %f\n" (string_of_program p) ll
+        (likelihood_under_grammar g (tint @> tint) p)
+        (likelihood_under_fragments gf (tint @> tint) p);
+    assert (true || (likelihood_under_fragments gf (tint @> tint) p) = (likelihood_under_grammar g (tint @> tint) p))));
+  assert false;
   let fragments = propose_fragments_from_frontiers 1 frontiers
     (* List.map frontiers ~f:(fun f -> *)
     (*     List.map f.programs ~f:(fun (p,_) -> *)
@@ -40,8 +53,9 @@ let _ =
     (* |> List.concat  |> List.concat |> remove_duplicates *)
   in
    fragments |> List.iter ~f:(fun f ->
-      Printf.printf "%s\n" (string_of_fragment f))
+      Printf.printf "%s : %s\n" (string_of_fragment f) (infer_fragment_type f |> string_of_type))
    ;
    Printf.printf "Got %d fragments" (List.length fragments)
-   ;
+(*    ;
    induce_fragments fragments frontiers
+ *)

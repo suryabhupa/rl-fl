@@ -5,7 +5,7 @@ open Obj
 
 let magical = Obj.magic;;
 
-let join separator elements= String.concat ~sep:separator elements
+let join ?separator:(separator = " ") elements= String.concat ~sep:separator elements
 
 let compose f g = fun x -> f (g x);;
 let (%) = compose;;

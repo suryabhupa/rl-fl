@@ -34,6 +34,24 @@ let rec show_program = function
 
 let string_of_program = show_program
 
+let rec infer_program_type context environment = function
+  | Index(j) ->
+    let (t,context) = List.nth_exn environment j |> chaseType context in (context,t)
+  | Primitive(t,_) -> let (t,context) = instantiate_type context t in (context,t)
+  | Abstraction(b) ->
+    let (xt,context) = makeTID context in
+    let (context,rt) = infer_program_type context (xt::environment) b in
+    let (ft,context) = chaseType context (xt @> rt) in
+    (context,ft)
+  | Apply(f,x) ->
+    let (rt,context) = makeTID context in
+    let (context, xt) = infer_program_type context environment x in
+    let (context, ft) = infer_program_type context environment f in
+    let context = unify context ft (xt @> rt) in
+    let (rt, context) = chaseType context rt in
+    (context, rt)
+    
+
 let lookup_primitive_callback =
   ref (fun n ->
       raise (Failure ("unknown primitive "^n)))
@@ -51,6 +69,8 @@ let primitive n t p =
 let lookup_primitive  = function
   | "k0" -> magical 0
   | "k1" -> magical 1
+  | "k2" -> magical 2
+  | "k3" -> magical 3
   | "+" -> magical (+)
   | "-" -> magical (-)
   | "*" -> magical ( * )
@@ -64,7 +84,7 @@ let lookup_primitive  = function
   | "length" -> magical List.length
   | "filter" -> magical (fun f l -> List.filter ~f:f l)
   | "eq?" -> magical (fun x y -> x = y)
-  | n -> raise (Failure "unknown primitive")
+  | n -> raise (Failure ("unknown primitive: "^n))
                    
 let rec evaluate (environment: 'b list) (p:program) : 'a =
   match p with
@@ -73,6 +93,26 @@ let rec evaluate (environment: 'b list) (p:program) : 'a =
   | Apply(f,x) -> (magical @@ evaluate environment f) (magical @@ evaluate environment x)
   | Primitive(_,n) -> (* !lookup_primitive_callback *) lookup_primitive n |> magical
 
+let rec remove_abstractions (n : int) (q : program) : program =
+  match (n,q) with
+  | (0,q) -> q
+  | (n,Abstraction(body)) -> remove_abstractions (n - 1) body
+  | _ -> raise (Failure "remove_abstractions")
 
 
+let test_program_inference program desired_type =
+  let (context,t) = infer_program_type empty_context [] program in
+  let (t,_) = chaseType context t in
+  let t = canonical_type t in
+  Printf.printf "%s : %s\n" (string_of_program program) (string_of_type t);
+  assert (t = (canonical_type desired_type))
 
+let program_test_cases() =
+  test_program_inference (Abstraction(Index(0))) (t0 @> t0);
+  test_program_inference (Abstraction(Abstraction(Apply(Index(0),Index(1))))) (t0 @> (t0 @> t1) @> t1);
+  test_program_inference (Abstraction(Abstraction(Index(1)))) (t0 @> t1 @> t0);
+  test_program_inference (Abstraction(Abstraction(Index(0)))) (t0 @> t1 @> t1);
+    
+;;
+(* program_test_cases() *)
+             
