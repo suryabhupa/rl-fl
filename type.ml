@@ -216,6 +216,11 @@ let rec get_arity = function
   | TCon(a,[_;r]) when a = "->" -> 1+get_arity r
   | _ -> 0
 
+let rec pad_type_with_arguments context n t =
+  if n = 0 then (context,t) else
+    let (a,context) = makeTID context in
+    let (context,suffix) = pad_type_with_arguments context (n - 1) t in
+    (context, a @> suffix)
 
 let make_ground g = TCon(g,[]);;
 let tint = make_ground "int";;

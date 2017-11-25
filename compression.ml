@@ -29,6 +29,13 @@ let is_fragment_index = function
   | FIndex(_) -> true
   | _ -> false
 
+let rec fragment_size = function
+  | FIndex(_) -> 1
+  | FVariable(_) -> 1
+  | FPrimitive(_) -> 1
+  | FAbstraction(b) -> fragment_size b
+  | FApply(p,q) -> fragment_size p + fragment_size q
+
 let infer_fragment_type ?context:(context = empty_context) ?environment:(environment = [])
     (f : fragment) : tp =
   let bindings : (tp FreeMap.t) ref = ref FreeMap.empty in
@@ -66,6 +73,11 @@ type fragment_grammar = {
   logVariable : float;
   fragments : (fragment*tp*float) list;
 }
+
+let string_of_fragment_grammar g =
+  "logVariable = "^(Float.to_string g.logVariable)^"\n"^
+  (join ~separator:"\n" (g.fragments |> List.map ~f:(fun (f,t,l) ->
+     Float.to_string l^"\t"^string_of_type t^"\t"^string_of_fragment f)))
 
 exception FragmentFail
 
@@ -140,22 +152,52 @@ let rec bind_fragment context environment
 
 
 let unifying_fragments (g : fragment_grammar) (environment : tp list) (request : tp) (context : tContext)
-   : (fragment*tp*tContext*float) list =
+   : (int*fragment*tp*tContext*float) list =
   let candidates = 
   g.fragments @ List.mapi ~f:(fun j t -> (FIndex(j),t,g.logVariable)) environment |>
-  List.filter_map ~f:(fun (p,t,ll) ->
+  List.filter_mapi ~f:(fun i (p,t,ll) ->
       try
         let (t,context) = if not (is_fragment_index p) then instantiate_type context t else (t,context) in
-        let (argument_types, return_type) = arguments_and_return_of_type t in
+        let (_, return_type) = arguments_and_return_of_type t in
         let newContext = unify context return_type request in
-        Some(p, t, newContext,ll)
+        Some(i, p, t, newContext,ll)
       with UnificationFailure -> None)
   in
-  let z = List.map ~f:(fun (_,_,_,ll) -> ll) candidates |> lse_list in
-  List.map ~f:(fun (p,t,k,ll) -> (p,t,k,ll-.z)) candidates
+  let z = List.map ~f:(fun (_,_,_,_,ll) -> ll) candidates |> lse_list in
+  List.map ~f:(fun (i,p,t,k,ll) -> (i,p,t,k,ll-.z)) candidates
 
+type use_counter = {possible_uses: float list; actual_uses: float list}
 
-let likelihood_under_fragments (g : fragment_grammar) (request : tp) (expression : program) : float =
+let use_plus u1 u2 = {possible_uses = u1.possible_uses +| u2.possible_uses;
+                      actual_uses = u1.actual_uses +| u2.actual_uses;}
+
+let scale_uses a u = {possible_uses = a *| u.possible_uses;
+                      actual_uses = a *| u.actual_uses;}
+
+let zero_uses g =
+  let n = List.length (g.fragments) in
+  let u = zeros n in
+  {possible_uses = u; actual_uses = u;}
+
+let pseudo_uses a g =
+  let n = List.length (g.fragments) in
+  let u = replicate n a in
+  {possible_uses = u; actual_uses = u;}
+  
+let one_hot_uses g j =
+  let n = List.length (g.fragments) in
+  assert (j < n);
+  let u = zeros j @ [1.] @ zeros (n - j - 1) in
+  {possible_uses = u; actual_uses = u;}
+
+let no_uses = {possible_uses = []; actual_uses = []}
+
+let show_uses g u =
+  List.iter2_exn (g.fragments) (List.zip_exn (u.actual_uses) (u.possible_uses)) ~f:(fun (f,_,_) (a, p) ->
+      (*       assert (a >= p); *)
+      if a > 0. then Printf.printf "Fragment %s used %f/%f times\n" (string_of_fragment f) a p else ())
+
+let likelihood_under_fragments (g : fragment_grammar) (request : tp) (expression : program) : float*use_counter =
 
   (* Any chain of applications could be broken up at any point by a
      fragment. This enumerates all of the different ways of breaking up an
@@ -170,21 +212,35 @@ let likelihood_under_fragments (g : fragment_grammar) (request : tp) (expression
   in
   
   let rec likelihood (context : tContext) (environment : tp list) (request : tp) (p : program)
-    : (tContext*float) =
+    : (tContext*float*use_counter) =
+    let (request,context) = chaseType context request in
     match request with
     
     (* a function - must start out with a sequence of lambdas *)
-    | TCon("->",[argument;return_type]) -> 
-      let newEnvironment = environment @ [argument] in
-      let body = remove_abstractions 1 p in
-      likelihood context  newEnvironment return_type body
-        
+    | TCon("->",[argument;return_type]) -> begin 
+        let newEnvironment = argument :: environment in
+        match p with
+        | Abstraction(body) -> 
+          likelihood context newEnvironment return_type body
+        | _ -> (context, Float.neg_infinity, zero_uses g)
+      end
+      
     | _ -> (* not a function so must be an application *)
       (* fragments we might match with based on their type *)
       let candidates = unifying_fragments g environment request context in
+      
+      (* The candidates are all different things that we could have possibly used *)
+      let number_of_productions = List.length g.fragments in
+      let used_indexes = candidates |> List.filter_map ~f:(fun (index,_,_,_,_) ->
+          if index < number_of_productions then Some(index) else None) in
+      let possible_uses = {actual_uses = zeros number_of_productions;
+                           possible_uses = 
+                             (0--(number_of_productions - 1)) |> List.map ~f:(fun i ->
+                                 if List.mem used_indexes i then 1.0 else 0.0)} in
+            
       (* For each way of carving up the program into a function and a list of arguments... *)
       possible_application_parses p |> List.map ~f:(fun (f,arguments) ->
-          List.map candidates ~f:(fun (candidate,unified_type,context,ll) ->
+          List.map candidates ~f:(fun (candidate_index,candidate,unified_type,context,ll) ->
             try
               let (context, fragment_type, holes, bindings) = match f with
                 | Index(i) ->
@@ -193,12 +249,13 @@ let likelihood_under_fragments (g : fragment_grammar) (request : tp) (expression
                 | _ -> 
                   bind_fragment context environment candidate f
               in
-              Printf.printf "BOUND: %s & %s\n" (string_of_program f) (string_of_fragment candidate);
-              (* todo: handle fragments with holes and bindings in them *)
-              (* assert (holes = []); *)
-              (* assert (FreeMap.length bindings = 0); *)
+              (* Printf.printf "BOUND: %s & %s\n" (string_of_program f) (string_of_fragment candidate); *)
+
               (* The final return type of the fragment corresponds to the requested type *)
-              let context = unify context request (return_of_type fragment_type) in
+              let (context, fragment_request) =
+                pad_type_with_arguments context (List.length arguments) request in
+              let context = unify context fragment_request fragment_type in
+              let (fragment_type, context) = chaseType context fragment_type in
               
               let (argument_types, _) = arguments_and_return_of_type fragment_type in
               if not (List.length argument_types = List.length arguments) then
@@ -224,28 +281,40 @@ let likelihood_under_fragments (g : fragment_grammar) (request : tp) (expression
                                    List.map (FreeMap.to_alist bindings) ~f:(fun (_,(binding,_)) -> binding) @ 
                                    argument_types in
 
-              let (application_likelihood, context) = 
+              let initial_use_vector = if is_index f
+                then possible_uses
+                else use_plus (one_hot_uses g candidate_index) possible_uses in
+
+              let (application_likelihood, context, application_uses) = 
                 List.fold_right (List.zip_exn arguments argument_types)
-                  ~init:(ll,context)
-                  ~f:(fun (argument, argument_type) (ll,context) ->
-                      let (context,argument_likelihood) = likelihood context environment argument_type argument
-                      in (ll+.argument_likelihood, context))
+                  ~init:(ll,context,initial_use_vector)
+                  ~f:(fun (argument, argument_type) (ll,context,uv) ->
+                      let (context,argument_likelihood,uvp) =
+                        likelihood context environment argument_type argument
+                      in (ll+.argument_likelihood, context, use_plus uv uvp))
               in
-              (Some(context), application_likelihood)
-            with | FragmentFail -> (None, Float.neg_infinity)
+              (Some(context), application_likelihood, application_uses)
+            with | FragmentFail -> (None, Float.neg_infinity, no_uses)
                  | UnificationFailure -> assert false)) |> List.concat |>
 
       (* Accumulate the probabilities from each parse. All of the contexts should be equivalent. *)
-      List.fold_right ~init:(context, Float.neg_infinity) ~f:(fun (mayBeContext, ll)
-                                                               (oldContext, acc) ->
+      List.fold_right ~init:(context, Float.neg_infinity, []) ~f:(fun (mayBeContext, ll, u)
+                                                                   (oldContext, acc, us) ->
           match mayBeContext with
           | None -> begin
               assert (is_invalid ll);
-              (oldContext,acc) end
-          | Some(c) when is_valid ll -> (c, lse acc ll)
-          | Some(_) -> (oldContext, acc))
+              (oldContext,acc,us) end
+          | Some(c) when is_valid ll -> (c, lse acc ll, (ll,u) :: us)
+          | Some(_) -> (oldContext, acc, us))
+      |> (fun (context,ll,listOfUses) ->
+          let expectedUses = listOfUses |> List.map ~f:(fun (_ll,u) -> scale_uses (exp (_ll -. ll)) u) |>
+                             List.fold_right ~init:(zero_uses g) ~f:use_plus in
+          (context,ll,expectedUses))
+          
         
-  in likelihood empty_context [] request expression |> snd
+  in
+  let (_,ll,u) = likelihood empty_context [] request expression in
+  (ll,u)
 
 let rec program_matches_fragment (p:program) (f:fragment) : (program list) option =
   match (f,p) with 
@@ -417,6 +486,52 @@ let induce_fragments (candidates : fragment list) (frontiers : frontier list) =
   done
   ;
   fst (!best)
+
+let marginal_likelihood_of_frontiers (g : fragment_grammar) (frontiers : frontier list) : float =
+  frontiers |> List.map ~f:(fun frontier ->
+      frontier.programs |> List.map ~f:(fun (expression,_) -> 
+          likelihood_under_fragments g frontier.request expression |> fst) |>
+      lse_list) |> List.fold ~init:0.0 ~f:(+.)
+
+let inside_outside ?alpha:(alpha = 1.0) (g : fragment_grammar) (frontiers : frontier list)
+  : fragment_grammar =
+  let compiled_uses = frontiers |> List.map ~f:(fun frontier ->
+      let likelihoods = frontier.programs |> List.map ~f:(fun (expression,_) -> 
+          likelihood_under_fragments g frontier.request expression)
+      in
+      let z = likelihoods |> List.map ~f:(fun (ll,_) -> ll) |> lse_list in
+      likelihoods |> List.map ~f:(fun (ll,u) -> scale_uses (exp (ll-.z)) u)) |> List.concat 
+  in
+  let uses = compiled_uses |> List.fold_right ~init:(pseudo_uses alpha g) ~f:use_plus in
+  let log_likelihoods = List.map2_exn (uses.actual_uses) (uses.possible_uses) ~f:(fun a p -> log a -. log p) in
+  {logVariable = g.logVariable;
+   fragments = List.map2_exn (g.fragments) log_likelihoods ~f:(fun (f,t,_) l -> (f,t,l))}
+
+let induce_fragment_grammar ?alpha:(alpha = 1.) (candidates : fragment list) (frontiers : frontier list)
+    (g0 : fragment_grammar) : fragment_grammar =
+  let frontiers = frontiers |> List.filter ~f:(fun f -> List.length (f.programs) > 0) in
+  (* types of the candidates *)
+  let candidates = candidates |> List.map ~f:(fun f -> (f, infer_fragment_type f)) in
+  
+  let rec induce (count : int) (g : fragment_grammar) : fragment_grammar =
+    if count = 0 then g else
+      let unused_candidates = candidates |> List.filter ~f:(fun (f,_) ->
+          not (List.exists (g.fragments)  ~f:(fun (fp,_,_) -> fp = f))) in
+      let children = unused_candidates |> List.map ~f:(fun (f,ft) ->
+          let gp = {logVariable = g0.logVariable;
+                    fragments = (f,ft,-1.)::g.fragments} in
+          let gp = inside_outside ~alpha:alpha gp frontiers in
+          let child_likelihood = marginal_likelihood_of_frontiers gp frontiers in
+          Printf.printf "Adding fragment %s changes marginal likelihood to %f\n"
+            (string_of_fragment f)
+            child_likelihood;
+            
+          (gp, child_likelihood)) in
+      let (best_child,best_score) = maximum_by ~cmp:(fun (_,l1) (_,l2) -> if l1 > l2 then 1 else -1) children in
+      Printf.printf "Best new grammar (%f): %s\n" (best_score) (string_of_fragment_grammar best_child);
+      induce (count - 1) best_child
+
+  in induce 5 g0
 
   
 

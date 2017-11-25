@@ -7,6 +7,16 @@ let magical = Obj.magic;;
 
 let join ?separator:(separator = " ") elements= String.concat ~sep:separator elements
 
+let rec replicate n x =
+  if n <= 0 then [] else  x::(replicate (n - 1) x)
+
+(* vector operations *)
+let rec zeros n = if n <= 0 then [] else 0.0::(zeros (n - 1))
+
+let (+|) a b = List.map2_exn ~f:(+.) a b
+
+let ( *| ) a v = v |> List.map ~f:(fun x -> a*.x)
+
 let compose f g = fun x -> f (g x);;
 let (%) = compose;;
 

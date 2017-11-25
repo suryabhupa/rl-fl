@@ -28,17 +28,17 @@ let supervised_task name ty examples =
 
 
 let keep_best_programs_in_frontier (k : int) (f : frontier) : frontier =
- {programs =  List.sort ~cmp:(fun (_,a) (_,b) -> if a > b then 1 else -1) f.programs |> flip List.take k }
+  {request = f.request;
+   programs =  List.sort ~cmp:(fun (_,a) (_,b) -> if a > b then -1 else 1) f.programs |> flip List.take k }
 
 (* Takes a frontier and a task. Ads in the likelihood on the task to
    the frontier and removes things that didn't hit the task *)
 let score_programs_for_task (f:frontier) (t:task) : frontier =
-  {programs = f.programs |> List.filter_map ~f:(fun (program, descriptionLength) ->
+  {request = f.request;
+   programs = f.programs |> List.filter_map ~f:(fun (program, descriptionLength) ->
        let likelihood = t.log_likelihood program in
-       if likelihood > -0.1 then begin 
-         Printf.printf "HIT: %s\n" t.name;
+       if likelihood > -0.1 then 
          Some((program, descriptionLength +. likelihood))
-       end
        else None)
   }
 
@@ -55,30 +55,15 @@ let enumerate_solutions_for_tasks grammar tasks frontier_size ?keepTheBest:(keep
       let frontier = List.nth fs j |> get_some in
       score_programs_for_task frontier t)
   in
-  match keepTheBest with
-  | 0 -> entire_frontiers
-  | k -> entire_frontiers |> List.map ~f:(keep_best_programs_in_frontier k)
-
-let top_solutions_for_tasks k grammar tasks solutions =
-  let top_solution_for_task t s =
-    List.map s ~f:(fun p -> (likelihood_under_grammar grammar t.task_type p, p))
-    |> List.sort ~cmp:(fun (l1,_) (l2,_) -> if l2 -. l1 > 0.0 then 1 else -1)
-    |> flip List.take k
-    |> List.map ~f:(fun (_,p) -> p)
-  in List.map2_exn ~f:top_solution_for_task tasks solutions
-
-
-
-
-
-let arithmetic_grammar =
-  primitive_grammar [ primitive "k0" tint 0;
-                      primitive "k1" tint 1;
-                      primitive "+" (tint @> tint @> tint) (+);
-                      primitive "*" (tint @> tint @> tint) ( * );
-                      primitive "apply" (t0 @> (t0 @> t1) @> t1) (fun x f -> f x);]
-
-
-
-
+  let best_frontiers = 
+    match keepTheBest with
+    | 0 -> entire_frontiers
+    | k -> entire_frontiers |> List.map ~f:(keep_best_programs_in_frontier k)
+  in
+  List.iter2_exn best_frontiers tasks ~f:(fun f t ->
+      match f.programs with
+      | ((p,_)::_) -> 
+        Printf.printf "HIT: %s with program %s\n" (t.name) (string_of_program p)
+      | _ -> Printf.printf "MISS: %s" t.name);
+  best_frontiers
 

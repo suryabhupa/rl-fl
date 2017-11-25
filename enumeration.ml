@@ -7,6 +7,7 @@ open Grammar
 
 type frontier = {
   programs: (program*float) list;
+  request: tp
 }
 
 let rec enumerate_programs (g: grammar) (context: tContext) (request: tp) (environment: tp list) (depth: float)
@@ -54,6 +55,6 @@ let iterative_deepening_enumeration (g:grammar) (request:tp) (size:int) : fronti
     (List.length result)
     (string_of_type request)
     (Time.diff (Time.now ()) startTime |> Core.Span.to_string);
-  {programs =  result}
+  {programs = result; request = request;}
 
 
