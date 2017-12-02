@@ -8,9 +8,15 @@ type program =
   | Abstraction of program
   | Apply of program*program
   | Primitive of tp * string
+  | Invented of tp * program
 
 let is_index = function
   |Index(_) -> true
+  |_ -> false
+
+let is_primitive = function
+  |Primitive(_,_) -> true
+  |Invented(_,_) -> true
   |_ -> false
 
 let program_children = function
@@ -24,20 +30,25 @@ let rec program_size p =
 let rec program_subexpressions p =
   p::(List.map (program_children p) program_subexpressions |> List.concat)
 
-let rec show_program = function
+let rec show_program (is_function : bool) = function
   | Index(j) -> "$" ^ string_of_int j
   | Abstraction(body) ->
-    "(lambda "^show_program body^")"
+    "(lambda "^show_program false body^")"
   | Apply(p,q) ->
-    "("^show_program p^" "^show_program q^")"
+    if is_function then
+      show_program true p^" "^show_program false q
+    else
+      "("^show_program true p^" "^show_program false q^")"
   | Primitive(_,n) -> n
+  | Invented(_,i) -> "#"^show_program false i
 
-let string_of_program = show_program
+let string_of_program = show_program false
 
 let rec infer_program_type context environment = function
   | Index(j) ->
     let (t,context) = List.nth_exn environment j |> chaseType context in (context,t)
   | Primitive(t,_) -> let (t,context) = instantiate_type context t in (context,t)
+  | Invented(t,_) -> let (t,context) = instantiate_type context t in (context,t)
   | Abstraction(b) ->
     let (xt,context) = makeTID context in
     let (context,rt) = infer_program_type context (xt::environment) b in
@@ -50,27 +61,18 @@ let rec infer_program_type context environment = function
     let context = unify context ft (xt @> rt) in
     let (rt, context) = chaseType context rt in
     (context, rt)
-    
 
-let lookup_primitive_callback =
-  ref (fun n ->
-      raise (Failure ("unknown primitive "^n)))
-    
-let primitive n t p =
-  (try
-    !lookup_primitive_callback n
-  with _ ->
-    let old_callback = !lookup_primitive_callback in
-    Printf.printf "Registering primitive %s\n" n;
-    lookup_primitive_callback :=
-      fun np -> if n = np then magical p else old_callback np);
-  Primitive(t, n)
+exception UnknownPrimitive of string
 
 let lookup_primitive  = function
   | "k0" -> magical 0
   | "k1" -> magical 1
   | "k2" -> magical 2
   | "k3" -> magical 3
+  | "k4" -> magical 4
+  | "k5" -> magical 5
+  | "k6" -> magical 6
+  | "k7" -> magical 7
   | "+" -> magical (+)
   | "-" -> magical (-)
   | "*" -> magical ( * )
@@ -84,20 +86,36 @@ let lookup_primitive  = function
   | "length" -> magical List.length
   | "filter" -> magical (fun f l -> List.filter ~f:f l)
   | "eq?" -> magical (fun x y -> x = y)
-  | n -> raise (Failure ("unknown primitive: "^n))
+  | n -> raise (UnknownPrimitive n)
                    
 let rec evaluate (environment: 'b list) (p:program) : 'a =
   match p with
   | Abstraction(b) -> magical @@ fun argument -> evaluate (argument::environment) b
   | Index(j) -> magical @@ List.nth_exn environment j
   | Apply(f,x) -> (magical @@ evaluate environment f) (magical @@ evaluate environment x)
-  | Primitive(_,n) -> (* !lookup_primitive_callback *) lookup_primitive n |> magical
+  | Primitive(_,n) -> lookup_primitive n
+  | Invented(_,i) -> evaluate [] i
 
 let rec remove_abstractions (n : int) (q : program) : program =
   match (n,q) with
   | (0,q) -> q
   | (n,Abstraction(body)) -> remove_abstractions (n - 1) body
   | _ -> raise (Failure "remove_abstractions")
+
+
+(* PRIMITIVES *)
+let primitive (name : string) (t : tp) _ = Primitive(t,name)
+
+let primitive0 = primitive "k0" tint 0;;
+let primitive1 = primitive "k1" tint 1;;
+let primitive2 = primitive "k2" tint 2;;
+let primitive3 = primitive "k3" tint 3;;
+let primitive4 = primitive "k4" tint 4;;
+let primitive5 = primitive "k5" tint 5;;
+let primitive_addition = primitive "+" (tint @> tint @> tint) (+);;
+let primitive_multiplication = primitive "*" (tint @> tint @> tint) ( * );;
+
+let primitive_apply = primitive "apply" (t1 @> (t1 @> t0) @> t0) (fun x f -> f x);;
 
 
 let test_program_inference program desired_type =

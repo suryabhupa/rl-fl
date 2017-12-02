@@ -14,6 +14,7 @@ type fragment =
   | FAbstraction of fragment
   | FApply of fragment*fragment
   | FPrimitive of tp * string
+  | FInvented of tp * program
   | FVariable
 
 let rec string_of_fragment = function
@@ -23,6 +24,7 @@ let rec string_of_fragment = function
   | FApply(p,q) ->
     "("^string_of_fragment p^" "^string_of_fragment q^")"
   | FPrimitive(_,n) -> n
+  | FInvented(_,i) -> "#"^string_of_program i
   | FVariable -> "??"
     
 let is_fragment_index = function
@@ -31,10 +33,11 @@ let is_fragment_index = function
 
 let rec fragment_size = function
   | FIndex(_) -> 1
-  | FVariable(_) -> 1
-  | FPrimitive(_) -> 1
-  | FAbstraction(b) -> fragment_size b
-  | FApply(p,q) -> fragment_size p + fragment_size q
+  | FVariable -> 1
+  | FPrimitive(_,_) -> 1
+  | FInvented(_,_) -> 1
+  | FAbstraction(b) -> 1 + fragment_size b
+  | FApply(p,q) -> 1 + fragment_size p + fragment_size q
 
 let infer_fragment_type ?context:(context = empty_context) ?environment:(environment = [])
     (f : fragment) : tp =
@@ -51,6 +54,7 @@ let infer_fragment_type ?context:(context = empty_context) ?environment:(environ
         (context,t)
       end
     | FPrimitive(t,_) -> let (t,context) = instantiate_type context t in (context,t)
+    | FInvented(t,_) -> let (t,context) = instantiate_type context t in (context,t)
     | FVariable ->
       let (t,context) = makeTID context in (context,t)
     | FAbstraction(b) ->
@@ -110,6 +114,7 @@ let rec bind_fragment context environment
   
   let rec hoist ?d:(d = 0) j p = match p with
     | Primitive(_,_) -> p
+    | Invented(_,_) -> p
     | Apply(f,x) -> Apply(hoist j f ~d:d, hoist j x ~d:d)
     | Abstraction(b) -> Abstraction(hoist j b ~d:(d+1))
     | Index(i) when i < d -> p (* bound within the hoisted code *)
@@ -131,6 +136,9 @@ let rec bind_fragment context environment
     (context, alpha, holes, free)
     
   | (FPrimitive(t,n1),Primitive(_,n2)) when n1 = n2 ->
+    let (t,context) = instantiate_type context t in
+    (context,t,[],FreeMap.empty)
+  | (FInvented(t,n1),Invented(_,n2)) when n1 = n2 ->
     let (t,context) = instantiate_type context t in
     (context,t,[],FreeMap.empty)
   | (FAbstraction(m),Abstraction(n)) ->
@@ -166,31 +174,47 @@ let unifying_fragments (g : fragment_grammar) (environment : tp list) (request :
   let z = List.map ~f:(fun (_,_,_,_,ll) -> ll) candidates |> lse_list in
   List.map ~f:(fun (i,p,t,k,ll) -> (i,p,t,k,ll-.z)) candidates
 
-type use_counter = {possible_uses: float list; actual_uses: float list}
+type use_counter = {possible_uses: float list; actual_uses: float list;
+                   possible_variables: float; actual_variables: float}
 
 let use_plus u1 u2 = {possible_uses = u1.possible_uses +| u2.possible_uses;
-                      actual_uses = u1.actual_uses +| u2.actual_uses;}
+                      actual_uses = u1.actual_uses +| u2.actual_uses;
+                      possible_variables = u1.possible_variables +. u2.possible_variables;
+                      actual_variables = u1.actual_variables +. u2.actual_variables;}
 
 let scale_uses a u = {possible_uses = a *| u.possible_uses;
-                      actual_uses = a *| u.actual_uses;}
+                      actual_uses = a *| u.actual_uses;
+                      possible_variables = a *. u.possible_variables;
+                      actual_variables = a *. u.actual_variables;}
+                     
 
 let zero_uses g =
   let n = List.length (g.fragments) in
   let u = zeros n in
-  {possible_uses = u; actual_uses = u;}
+  {possible_uses = u; actual_uses = u;
+   possible_variables = 0.; actual_variables = 0.;}
 
 let pseudo_uses a g =
   let n = List.length (g.fragments) in
   let u = replicate n a in
-  {possible_uses = u; actual_uses = u;}
+  {possible_uses = u; actual_uses = u;
+   possible_variables = a; actual_variables = a;}
   
 let one_hot_uses g j =
   let n = List.length (g.fragments) in
   assert (j < n);
   let u = zeros j @ [1.] @ zeros (n - j - 1) in
-  {possible_uses = u; actual_uses = u;}
+  {possible_uses = u; actual_uses = u;
+   possible_variables = 0.; actual_variables = 0.;}
 
-let no_uses = {possible_uses = []; actual_uses = []}
+let one_hot_variable_use g =
+  let n = List.length (g.fragments) in
+  let u = zeros n in
+  {possible_uses = u; actual_uses = u;
+  possible_variables = 1.; actual_variables = 1.;}
+
+let no_uses = {possible_uses = []; actual_uses = [];
+               possible_variables = 0.; actual_variables = 0.;}
 
 let show_uses g u =
   List.iter2_exn (g.fragments) (List.zip_exn (u.actual_uses) (u.possible_uses)) ~f:(fun (f,_,_) (a, p) ->
@@ -234,6 +258,10 @@ let likelihood_under_fragments (g : fragment_grammar) (request : tp) (expression
       let used_indexes = candidates |> List.filter_map ~f:(fun (index,_,_,_,_) ->
           if index < number_of_productions then Some(index) else None) in
       let possible_uses = {actual_uses = zeros number_of_productions;
+                           actual_variables = 0.;
+                           possible_variables =
+                             candidates |> List.exists ~f:(fun (_,f,_,_,_) -> is_fragment_index f) |>
+                             float_of_bool;
                            possible_uses = 
                              (0--(number_of_productions - 1)) |> List.map ~f:(fun i ->
                                  if List.mem used_indexes i then 1.0 else 0.0)} in
@@ -281,9 +309,10 @@ let likelihood_under_fragments (g : fragment_grammar) (request : tp) (expression
                                    List.map (FreeMap.to_alist bindings) ~f:(fun (_,(binding,_)) -> binding) @ 
                                    argument_types in
 
-              let initial_use_vector = if is_index f
-                then possible_uses
-                else use_plus (one_hot_uses g candidate_index) possible_uses in
+              let initial_use_vector = use_plus possible_uses (if is_index f
+                                                               then one_hot_variable_use g
+                                                               else one_hot_uses g candidate_index)
+              in
 
               let (application_likelihood, context, application_uses) = 
                 List.fold_right (List.zip_exn arguments argument_types)
@@ -316,41 +345,13 @@ let likelihood_under_fragments (g : fragment_grammar) (request : tp) (expression
   let (_,ll,u) = likelihood empty_context [] request expression in
   (ll,u)
 
-let rec program_matches_fragment (p:program) (f:fragment) : (program list) option =
-  match (f,p) with 
-  | (FVariable,_) -> Some([p])
-  | (FPrimitive(_,name),Primitive(_,namep)) when name = namep -> Some([]) 
-  | (FPrimitive(_,name),_) -> None
-  | (FApply(a,b),Apply(m,n)) -> begin 
-      match program_matches_fragment m a with 
-      | None -> None 
-      | Some(prefix) -> match program_matches_fragment n b with
-        | None -> None 
-        | Some(suffix) -> Some(prefix@suffix) 
-    end
-  | (FAbstraction(m),Abstraction(n)) ->
-    program_matches_fragment n m
-  | (FIndex(_),Index(_)) -> Some([])
-  | _ -> None
-    
-(*     (\* Referencing a variable bound inside of the fragment *\) *)
-(*     | (FIndex(j),Index(k)) when j = k && j < abstraction_depth -> Some([]) *)
-(*     (\* Referencing a free variable in the fragment *\) *)
-(*     | (FIndex(j),_) when j >= abstraction_depth -> *)
-(*       begin *)
-(*         match Hashtbl.Poly.find bindings (j - abstraction_depth)  with *)
-(*         | Some(pp) *)
-(*       end *)
-(*       Some([p]) *)
-    
-
-
 
 let rec fragment_of_program = function
   | Index(j) -> FIndex(j)
   | Abstraction(body) ->FAbstraction(fragment_of_program body)
   | Apply(p,q) -> FApply(fragment_of_program p, fragment_of_program q)
   | Primitive(t,n) -> FPrimitive(t,n)
+  | Invented(t,i) -> FInvented(t,i)
 
 let fragment_grammar_of_grammar (g : grammar) : fragment_grammar =
   {logVariable = g.logVariable;
@@ -363,6 +364,7 @@ let close_fragment (f:fragment) : program =
   let rec walk d = function
     | FVariable -> begin incr number_of_abstractions; Index(!number_of_abstractions + d - 1) end
     | FPrimitive(t,n) -> Primitive(t,n)
+    | FInvented(t,n) -> Invented(t,n)
     | FAbstraction(b) -> Abstraction(walk (d+1) b)
     | FApply(f,x) -> Apply(walk d f, walk d x)
     | FIndex(j) when j < d -> Index(j)
@@ -395,7 +397,9 @@ let rec fragments (d:int) (a:int) (p:program) =
     | Abstraction(body) ->
       fragments (d+1) a body |> List.map ~f:(fun b -> FAbstraction(b))
     | Primitive(t,n) when a = 0 -> [FPrimitive(t,n)]
-    | Primitive(t,n) -> []
+    | Primitive(_,_) -> []
+    | Invented(t,n) when a = 0 -> [FInvented(t,n)]
+    | Invented(_,_) -> []
   in
   (* Given that there are d surrounding lambdas in the thing we are
      trying to fragment, and e surrounding lambdas in the fragmented
@@ -408,25 +412,33 @@ let rec fragments (d:int) (a:int) (p:program) =
     | Index(j) -> j > e - 1 && (* has to not refer to something bound in the fragment *)
                   j < e + d (* has to not refer to something outside the whole program body *)
     | Primitive(_,_) -> false
+    | Invented(_,_) -> false
   in
   if a = 1 && (not (refers_to_bound_variables 0 p)) then FVariable :: recursiveFragments else recursiveFragments
 
 let is_fragment_nontrivial = function
   | FAbstraction(_) -> false
+  | FApply(FAbstraction(_),FIndex(_)) -> false
+  | FApply(FAbstraction(_),FVariable) -> false
   | f -> 
     let rec variables = function
       | FVariable -> 1
       | FAbstraction(b) -> variables b
       | FApply(f,x) -> variables f + variables x
+      | FIndex(_) -> 1
       | _ -> 0
     in
     let rec primitives = function
       | FPrimitive(_,_) -> 1
+      | FInvented(_,_) -> 1
       | FAbstraction(b) -> primitives b
       | FApply(f,x) -> primitives f + primitives x
       | _ -> 0
     in
-    Float.of_int (primitives f) +. (0.5 *. (Float.of_int (variables f))) > 1.5
+    let keep = Float.of_int (primitives f) +. (0.5 *. (Float.of_int (variables f))) > 1.5 in
+    (* if keep then Printf.printf "Keeping fragment %s\n" (string_of_fragment f) else *)
+    (*   Printf.printf "Discarding fragment (%d,%d) %s\n" (primitives f) (variables f) (string_of_fragment f); *)
+    keep
 
 let rec propose_fragments (a:int) (program:program) : fragment list =
   let recursiveFragments =
@@ -451,42 +463,6 @@ let rec propose_fragments_from_frontiers (a:int) (frontiers: frontier list) : fr
   in
   if a = 0 then thisa else thisa@(propose_fragments_from_frontiers (a - 1) frontiers)
 
-let rec program_cost_with_fragments (fragments : fragment list) (p : program) : int =
-  let recursive_costs = fragments |> List.map ~f:(fun f ->
-      match program_matches_fragment p f with
-      | None -> None
-      | Some(children) -> Some(1 + sum (List.map ~f:(program_cost_with_fragments fragments) children)))
-  in
-  let basics_cost = match p with
-    | Abstraction(b) -> 1 + program_cost_with_fragments fragments b
-    | Apply(f,x) -> program_cost_with_fragments fragments f + program_cost_with_fragments fragments x
-    | _ -> 1 (* variable or other terminal *)
-  in
-  List.filter (Some(basics_cost) :: recursive_costs) ~f:is_some |>
-  List.map ~f:get_some |> minimum
-
-let induce_fragments (candidates : fragment list) (frontiers : frontier list) =
-  let frontiers = frontiers |> List.filter ~f:(fun f -> List.length f.programs > 0) in
-  let fitness candidate = 
-    frontiers |> List.map ~f:(fun f ->
-        f.programs |> List.map ~f:(fun (p,_) ->
-            program_cost_with_fragments candidate p)
-          |> minimum) |> sum
-  in
-  Printf.printf "Initial fitness: %d" (fitness []);
-  let best = ref ([],fitness []) in
-  for step = 1 to 5 do
-    Printf.printf "STEP %d" step;
-    let extensions = candidates |> List.map ~f:(fun k -> k::(fst !best)) in
-    let scores = extensions |> List.map ~f:fitness |> List.zip extensions |> get_some in
-    let (bestExtension,bestFitness) = scores |> maximum_by ~cmp:(fun (_,k1) (_,k2) -> k2 - k1) in
-    Printf.printf "Decided to add the fragment %s\n" (string_of_fragment @@ List.hd_exn bestExtension);
-    Printf.printf "New fitness: %d\n" bestFitness;
-    best := (bestExtension,bestFitness);
-  done
-  ;
-  fst (!best)
-
 let marginal_likelihood_of_frontiers (g : fragment_grammar) (frontiers : frontier list) : float =
   frontiers |> List.map ~f:(fun frontier ->
       frontier.programs |> List.map ~f:(fun (expression,_) -> 
@@ -504,41 +480,58 @@ let inside_outside ?alpha:(alpha = 1.0) (g : fragment_grammar) (frontiers : fron
   in
   let uses = compiled_uses |> List.fold_right ~init:(pseudo_uses alpha g) ~f:use_plus in
   let log_likelihoods = List.map2_exn (uses.actual_uses) (uses.possible_uses) ~f:(fun a p -> log a -. log p) in
-  {logVariable = g.logVariable;
+  {logVariable = log uses.actual_variables -. log uses.possible_variables;
    fragments = List.map2_exn (g.fragments) log_likelihoods ~f:(fun (f,t,_) l -> (f,t,l))}
 
-let induce_fragment_grammar ?alpha:(alpha = 1.) (candidates : fragment list) (frontiers : frontier list)
-    (g0 : fragment_grammar) : fragment_grammar =
+let induce_fragment_grammar ?lambda:(lambda = 2.) ?alpha:(alpha = 1.) ?beta:(beta = 1.)
+    (candidates : fragment list) (frontiers : frontier list) (g0 : fragment_grammar)
+     : fragment_grammar =
   let frontiers = frontiers |> List.filter ~f:(fun f -> List.length (f.programs) > 0) in
   (* types of the candidates *)
   let candidates = candidates |> List.map ~f:(fun f -> (f, infer_fragment_type f)) in
+
+  let score (g : fragment_grammar) : fragment_grammar*float =
+    (* flatten the fragment grammar's production probabilities *)
+    let gp = {logVariable = -1.;
+             fragments = g.fragments |> List.map ~f:(fun (f,t,_) -> (f,t,-1.))} in
+    let gp = inside_outside ~alpha:alpha gp frontiers in
+    let child_likelihood = marginal_likelihood_of_frontiers gp frontiers in
+    let child_structure_penalty =
+      lambda *. (List.fold_left gp.fragments ~init:0.0 ~f:(fun penalty (f,_,_) -> penalty +. (fragment_size f |> Float.of_int))) in
+    let child_parameter_penalty = beta *. Float.of_int (List.length gp.fragments) in
+    (gp, child_likelihood-.child_structure_penalty-.child_parameter_penalty)
+  in
   
-  let rec induce (count : int) (g : fragment_grammar) : fragment_grammar =
+  let rec induce (previous_score : float) (count : int) (g : fragment_grammar) : fragment_grammar =
     if count = 0 then g else
       let unused_candidates = candidates |> List.filter ~f:(fun (f,_) ->
           not (List.exists (g.fragments)  ~f:(fun (fp,_,_) -> fp = f))) in
       let children = unused_candidates |> List.map ~f:(fun (f,ft) ->
-          let gp = {logVariable = g0.logVariable;
-                    fragments = (f,ft,-1.)::g.fragments} in
-          let gp = inside_outside ~alpha:alpha gp frontiers in
-          let child_likelihood = marginal_likelihood_of_frontiers gp frontiers in
-          Printf.printf "Adding fragment %s changes marginal likelihood to %f\n"
-            (string_of_fragment f)
-            child_likelihood;
-            
-          (gp, child_likelihood)) in
+          score {logVariable = g0.logVariable;
+                 fragments = (f,ft,-1.)::g.fragments}) in
       let (best_child,best_score) = maximum_by ~cmp:(fun (_,l1) (_,l2) -> if l1 > l2 then 1 else -1) children in
       Printf.printf "Best new grammar (%f): %s\n" (best_score) (string_of_fragment_grammar best_child);
-      induce (count - 1) best_child
+      flush stdout;
+      if best_score > previous_score then
+        induce best_score (count - 1) best_child
+      else g
 
-  in induce 5 g0
+  in
+  let (g0,s0) = score g0 in
+  induce s0 100 g0
 
-  
+let grammar_of_fragment_grammar (g : fragment_grammar) : grammar =
+  {logVariable = g.logVariable;
+   library = g.fragments |> List.map ~f:(fun (f,_,l) ->
+       let p = close_fragment f in
+       let (_,t) = infer_program_type empty_context [] p in
+       let p = if is_primitive p then p else Invented(t,p) in
+       (p,t,l))}
 
 let testClosing() =
   let p = Apply(Abstraction(Apply(Index(2),Index(0))),Index(1)) in
   [FApply(FIndex(0),FAbstraction(FIndex(99)))] @ propose_fragments 1 p |>
-  List.map ~f:(fun f -> Printf.printf "%s\t%s\n" (string_of_fragment f) (close_fragment f |> show_program))
+  List.map ~f:(fun f -> Printf.printf "%s\t%s\n" (string_of_fragment f) (close_fragment f |> string_of_program))
 
 let testBinding (intended_outcome : bool) (f : fragment) (p : program) =
   Printf.printf "\nBinding test case: %s  ==  %s\n" (string_of_fragment f) (string_of_program p);

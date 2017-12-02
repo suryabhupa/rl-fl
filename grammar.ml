@@ -17,10 +17,13 @@ let primitive_grammar primitives =
    logVariable = log 0.5
   }
 
-
+let grammar_primitives g =
+  {logVariable = g.logVariable;
+   library = g.library |> List.filter ~f:(fun (p,_,_) -> is_primitive p)}
 
 let string_of_grammar g =
-  string_of_float g.logVariable ^ "\n"
+  string_of_float g.logVariable ^ "\n" ^
+  join ~separator:"\n" (g.library |> List.map ~f:(fun (p,t,l) -> Float.to_string l^"\t"^(string_of_type t)^"\t"^(string_of_program p)))
 
 let unifying_expressions g environment request context : (program*tp*tContext*float) list =
   (* given a grammar environment requested type and typing context,
@@ -64,7 +67,7 @@ let likelihood_under_grammar g request expression =
       | [] -> raise (Failure "walking the application tree")
       | f::xs ->
         match List.find candidates ~f:(fun (candidate,_,_,_) -> candidate = f) with
-        | None -> raise (Failure ("could not find function in grammar: "^(show_program p)))
+        | None -> raise (Failure ("could not find function in grammar: "^(string_of_program p)))
         | Some(_, f_t, newContext, functionLikelihood) ->
           let (f_t, newContext) = chaseType newContext f_t in
           let (argument_types, _) = arguments_and_return_of_type f_t in

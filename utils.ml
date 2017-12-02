@@ -5,6 +5,10 @@ open Obj
 
 let magical = Obj.magic;;
 
+let float_of_bool = function
+  | true -> 1.
+  | false -> 0.
+
 let join ?separator:(separator = " ") elements= String.concat ~sep:separator elements
 
 let rec replicate n x =

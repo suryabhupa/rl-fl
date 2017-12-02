@@ -20,7 +20,8 @@ let supervised_task name ty examples =
         if List.for_all ~f:(fun (x,y) ->
             try
               f x = y
-            with _ -> false) examples
+            with | UnknownPrimitive(n) -> raise (Failure ("Unknown primitive: "^n))
+                 | _ -> false) examples
         then 0.0
         else log 0.0)
   }
@@ -49,11 +50,13 @@ let enumerate_solutions_for_tasks grammar tasks frontier_size ?keepTheBest:(keep
   (* the corresponding frontiers. [frontier] *)
   let fs = List.map ts ~f:(fun t -> iterative_deepening_enumeration grammar t frontier_size) in
 
-  let entire_frontiers = 
-  List.map tasks ~f:(fun t ->
-      let j = List.findi ts ~f:(fun _ tp -> tp = t.task_type) |> get_some |> fst in
-      let frontier = List.nth fs j |> get_some in
-      score_programs_for_task frontier t)
+  (* Construct the frontiers by keeping the programs that worked for each task *)
+  let entire_frontiers =
+    time_it "Evaluated programs against tasks"  @@ fun _ -> 
+    List.map tasks ~f:(fun t ->
+        let j = List.findi ts ~f:(fun _ tp -> tp = t.task_type) |> get_some |> fst in
+        let frontier = List.nth fs j |> get_some in
+        score_programs_for_task frontier t)
   in
   let best_frontiers = 
     match keepTheBest with
@@ -64,6 +67,6 @@ let enumerate_solutions_for_tasks grammar tasks frontier_size ?keepTheBest:(keep
       match f.programs with
       | ((p,_)::_) -> 
         Printf.printf "HIT: %s with program %s\n" (t.name) (string_of_program p)
-      | _ -> Printf.printf "MISS: %s" t.name);
+      | _ -> Printf.printf "MISS: %s\n" t.name);
   best_frontiers
 

@@ -33,13 +33,18 @@ let rec right_of_arrow t =
   | TCon("->",[_;p]) -> p
 (*   | _ -> raise (Failure "arguments_and_return_of_type") *)
 
-let rec string_of_type (t : tp) : string = 
+let rec show_type (is_return : bool) (t : tp) : string = 
   match t with
   | TID(i) -> "TV["^string_of_int i^"]"
   | TCon(k,[]) -> k
-  | TCon(k,[p;q]) when k = "->" -> "("^(string_of_type p)^" -> "^(string_of_type q)^")"
-  | TCon(k,a) -> "("^k^" "^(String.concat ~sep:" " (List.map a ~f:string_of_type))^")"
-
+  | TCon(k,[p;q]) when k = "->" ->
+    if is_return then
+      (show_type false p)^" -> "^(show_type true q)
+    else
+      "("^(show_type false p)^" -> "^(show_type true q)^")"
+  | TCon(k,a) -> k^"<"^(String.concat ~sep:", " (List.map a ~f:(show_type true)))^">"
+                 
+let string_of_type = show_type true
 
 let makeTID context = 
   (TID(fst context), (fst context+1, snd context))
