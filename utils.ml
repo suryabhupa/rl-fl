@@ -143,6 +143,10 @@ let time_it description callback =
   print_newline ();
   return_value
 
+let flush_everything () =
+  flush stdout;
+  flush stderr
+
 (* progress bar *)
 type progress_bar = { maximum_progress : int; mutable current_progress : int; }
 

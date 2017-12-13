@@ -6,6 +6,7 @@ open Program
 open Enumeration
 open Task
 open Grammar
+open EC
     
 let load_list_tasks f =
   let open Yojson.Basic.Util in
@@ -32,34 +33,35 @@ let load_list_tasks f =
 
 
 let list_grammar =
-  primitive_grammar [ primitive "k0" tint 0;
-                      primitive "k1" tint 1;
-                      primitive "+" (tint @> tint @> tint) (+);
-                      primitive "-" (tint @> tint @> tint) (-);
-                      primitive "sort" (tlist tint @> tlist tint) (List.sort ~cmp:(fun x y -> x - y));
-                      primitive "reverse" (tlist tint @> tlist tint) (List.rev);
-                      primitive "append"  (tlist tint @> tlist tint @> tlist tint) (@);
-                      primitive "singleton"  (tint @> tlist tint) (fun x -> [x]);
-                      primitive "slice" (tint @> tint @> tlist tint @> tlist tint) (slice);
-                      primitive "length" (tlist tint @> tint) (List.length);
-                      primitive "map" ((tint @> tint) @> (tlist tint) @> (tlist tint)) (fun f l -> List.map ~f:f l);
-                      primitive "fold_left" ((tint @> (tlist tint) @> tint) @> tint @> (tlist tint) @> tint) (fun f x0 l -> List.fold_left ~f:f ~init:x0 l);
-                      primitive "fold_right" (((tlist tint) @> tint @> tint) @> tint @> (tlist tint) @> tint) (fun f x0 l -> List.fold_right ~f:f ~init:x0 l);
-                      primitive "filter" ((tint @> tboolean) @> (tlist tint) @> (tlist tint)) (fun f l -> List.filter ~f:f l);
-                      primitive "eq?" (tint @> tint @> tboolean) ( = );
-                      primitive "not" (tboolean @> tboolean) (not);
-                      primitive "gt?" (tint @> tint @> tboolean) (fun (x: int) (y: int) -> x > y);
-                      primitive "apply" (t0 @> (t0 @> t1) @> t1) (fun x f -> f x);]
+  primitive_grammar [ primitive0;
+                      primitive1;
+                      primitive2;
+                      primitive3;
+                      primitive4;
+                      primitive5;
+                      primitive6;
+                      primitive7;
+                      primitive8;
+                      primitive9;
+                      primitive_addition;
+                      primitive_subtraction;
+                      primitive_sort;
+                      primitive_reverse;
+                      primitive_append;
+                      primitive_singleton;
+                      primitive_slice;
+                      primitive_length;
+                      primitive_map;
+                      primitive_fold_right;
+                      primitive_filter;
+                      primitive_equal;
+                      primitive_not;
+                      primitive_greater_than;
+                      primitive_apply;]
 
 let _ =
-  (* change these to the grammar and appropriate type as needed *)
-  let grammar = list_grammar
-  and tasks = load_list_tasks "list_tasks.json"
-  in
-  let solutions = enumerate_solutions_for_tasks grammar tasks 1000000 in
-
-
-  List.iter2_exn tasks solutions ~f:(fun t s ->
-      if s = [] then Printf.printf "No solution for task %s\n" t.name
-      else Printf.printf "A solution for task %s:\n\t%s\n" t.name (show_program @@ List.hd_exn s))
-  
+  exploration_compression (load_list_tasks "list_tasks.json")
+    list_grammar
+    ~keepTheBest:1 ~arity:1
+    1000000 (*frontier size*)
+    5 (*iterations*)

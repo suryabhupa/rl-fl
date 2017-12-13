@@ -73,6 +73,8 @@ let lookup_primitive  = function
   | "k5" -> magical 5
   | "k6" -> magical 6
   | "k7" -> magical 7
+  | "k8" -> magical 8
+  | "k9" -> magical 9
   | "+" -> magical (+)
   | "-" -> magical (-)
   | "*" -> magical ( * )
@@ -85,7 +87,10 @@ let lookup_primitive  = function
   | "slice" -> magical slice
   | "length" -> magical List.length
   | "filter" -> magical (fun f l -> List.filter ~f:f l)
+  | "fold_right" -> magical (fun f x0 l -> List.fold_right ~f:f ~init:x0 l)
   | "eq?" -> magical (fun x y -> x = y)
+  | "gt?" -> magical (fun (x : int) (y : int) -> x > y)
+  | "not" -> magical (fun x -> not x)
   | n -> raise (UnknownPrimitive n)
                    
 let rec evaluate (environment: 'b list) (p:program) : 'a =
@@ -112,11 +117,28 @@ let primitive2 = primitive "k2" tint 2;;
 let primitive3 = primitive "k3" tint 3;;
 let primitive4 = primitive "k4" tint 4;;
 let primitive5 = primitive "k5" tint 5;;
+let primitive6 = primitive "k6" tint 6;;
+let primitive7 = primitive "k7" tint 7;;
+let primitive8 = primitive "k8" tint 8;;
+let primitive9 = primitive "k9" tint 9;;
 let primitive_addition = primitive "+" (tint @> tint @> tint) (+);;
+let primitive_subtraction = primitive "-" (tint @> tint @> tint) (-);;
 let primitive_multiplication = primitive "*" (tint @> tint @> tint) ( * );;
 
 let primitive_apply = primitive "apply" (t1 @> (t1 @> t0) @> t0) (fun x f -> f x);;
 
+let primitive_sort = primitive "sort" (tlist tint @> tlist tint) (List.sort ~cmp:(fun x y -> x - y));;
+let primitive_reverse = primitive "reverse" (tlist tint @> tlist tint) (List.rev);;
+let primitive_append = primitive "append"  (tlist tint @> tlist tint @> tlist tint) (@);;
+let primitive_singleton = primitive "singleton"  (tint @> tlist tint) (fun x -> [x]);;
+let primitive_slice = primitive "slice" (tint @> tint @> tlist tint @> tlist tint) slice;;
+let primitive_length = primitive "length" (tlist tint @> tint) (List.length);;
+let primitive_map = primitive "map" ((tint @> tint) @> (tlist tint) @> (tlist tint)) (fun f l -> List.map ~f:f l);;
+let primitive_fold_right = primitive "fold_right" ((tint @> tint @> tint) @> tint @> (tlist tint) @> tint) (fun f x0 l -> List.fold_right ~f:f ~init:x0 l);;
+let primitive_filter = primitive "filter" ((tint @> tboolean) @> (tlist tint) @> (tlist tint)) (fun f l -> List.filter ~f:f l);;
+let primitive_equal = primitive "eq?" (tint @> tint @> tboolean) ( = );;
+let primitive_not = primitive "not" (tboolean @> tboolean) (not);;
+let primitive_greater_than = primitive "gt?" (tint @> tint @> tboolean) (fun (x: int) (y: int) -> x > y);;
 
 let test_program_inference program desired_type =
   let (context,t) = infer_program_type empty_context [] program in

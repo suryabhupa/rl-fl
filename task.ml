@@ -16,6 +16,8 @@ let supervised_task name ty examples =
   { name = name;
     task_type = ty;
     log_likelihood = (fun p ->
+        (*         Printf.printf "About evaluate the log likelihood of program : %s =  %s\n" (string_of_type ty) (string_of_program p);
+        flush_everything(); *)
         let f = evaluate [] p in
         if List.for_all ~f:(fun (x,y) ->
             try
