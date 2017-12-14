@@ -107,6 +107,21 @@ let rec remove_abstractions (n : int) (q : program) : program =
   | (n,Abstraction(body)) -> remove_abstractions (n - 1) body
   | _ -> raise (Failure "remove_abstractions")
 
+let rec variable_is_bound ?height:(height = 0) (p : program) =
+  match p with
+  | Index(j) -> j = height
+  | Apply(f,x) -> variable_is_bound ~height:height f || variable_is_bound ~height:height x
+  | Invented(_,i) -> variable_is_bound ~height:height i
+  | Primitive(_,_) -> false
+  | Abstraction(b) -> variable_is_bound ~height:(height+1) b
+
+let rec shift_free_variables ?height:(height = 0) shift p = match p with
+  | Index(j) -> if j < height then p else Index(j + shift)
+  | Apply(f,x) -> Apply(shift_free_variables ~height:height shift f,
+                        shift_free_variables ~height:height shift x)
+  | Invented(_,_) -> p
+  | Primitive(_,_) -> p
+  | Abstraction(b) -> Abstraction(shift_free_variables ~height:(height+1) shift b)
 
 (* PRIMITIVES *)
 let primitive (name : string) (t : tp) _ = Primitive(t,name)

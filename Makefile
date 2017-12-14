@@ -2,6 +2,10 @@ c = corebuild -pkg yojson
 
 type:
 	$(c) type.native; cp type.native test
+differentiation:
+	$(c) differentiation.native; cp differentiation.native test
+combinator:
+	$(c) combinator.native; cp combinator.native test
 program:
 	$(c) program.native; cp program.native test
 enumeration:
