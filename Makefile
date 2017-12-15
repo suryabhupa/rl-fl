@@ -4,6 +4,8 @@ type:
 	$(c) type.native; cp type.native test
 differentiation:
 	$(c) differentiation.native; cp differentiation.native test
+sfg:
+	$(c) sfg.native; cp sfg.native test
 combinator:
 	$(c) combinator.native; cp combinator.native test
 program:

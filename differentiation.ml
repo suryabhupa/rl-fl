@@ -11,6 +11,8 @@ type variable = {mutable gradient : float option;
                  (* the additional float parameter is d Descendent / d This *)
                  mutable descendents : (variable*float) list}
 
+let variable_value v = v.data |> get_some
+
 let make_variable forward backward arguments =
   let values = List.map ~f:(fun v -> v.data |> get_some) arguments in
   let initial_value = forward values in
@@ -59,6 +61,16 @@ let placeholder () =
                arguments = [];
                descendents = [];
                data = None;
+               forwardProcedure = (fun _ -> s.data |> get_some);
+               backwardProcedure = (fun _ -> []);
+              }
+  in s
+
+let random_variable ?mean:(mean = 0.) ?standard_deviation:(standard_deviation = 0.1) () =
+  let rec s = {gradient = None;
+               arguments = [];
+               descendents = [];
+               data = Some(normal standard_deviation mean);
                forwardProcedure = (fun _ -> s.data |> get_some);
                backwardProcedure = (fun _ -> []);
               }

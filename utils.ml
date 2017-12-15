@@ -24,6 +24,8 @@ let ( *| ) a v = v |> List.map ~f:(fun x -> a*.x)
 let compose f g = fun x -> f (g x);;
 let (%) = compose;;
 
+let fold1 f l = List.fold_right ~init:(List.hd_exn l) ~f:f (List.tl_exn l)
+
 let is_some = function
   | None -> false
   | _ -> true;;

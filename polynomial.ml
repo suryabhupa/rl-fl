@@ -35,4 +35,4 @@ let polynomial_grammar =
 
                                                              
 let _ =
-  exploration_compression polynomial_tasks polynomial_grammar ~keepTheBest:1 1000000 5
+  exploration_compression polynomial_tasks polynomial_grammar ~keepTheBest:1 10000 5
